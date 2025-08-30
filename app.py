@@ -30,6 +30,87 @@ def allowed_file(filename):
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # Backend sentiment analysis functions (dari kode Python Anda)
+def load_comments_from_file_stream(file_obj):
+    """Load komentar dari file stream (untuk menghindari file locking)"""
+    try:
+        # Reset file pointer ke awal
+        file_obj.seek(0)
+        
+        # Baca file langsung dari memory stream
+        df = pd.read_excel(file_obj.stream)
+        
+        comment_columns = ['comment', 'Comment', 'AuthorComment', 'text', 'Text', 'Komentar']
+        comment_col = None
+        
+        for col in comment_columns:
+            if col in df.columns:
+                comment_col = col
+                break
+        
+        if comment_col is None:
+            return []
+        
+        comments = df[comment_col].dropna().astype(str).tolist()
+        return comments
+        
+    except Exception as e:
+        print(f"Error loading from stream: {e}")
+        return []
+
+def load_comments_with_retry(file_path, max_retries=3):
+    """Load komentar dengan retry mechanism untuk handle file locking"""
+    for attempt in range(max_retries):
+        try:
+            # Tunggu sebentar sebelum retry
+            if attempt > 0:
+                time.sleep(1)
+            
+            df = pd.read_excel(file_path)
+            
+            comment_columns = ['comment', 'Comment', 'AuthorComment', 'text', 'Text', 'Komentar']
+            comment_col = None
+            
+            for col in comment_columns:
+                if col in df.columns:
+                    comment_col = col
+                    break
+            
+            if comment_col is None:
+                return []
+            
+            comments = df[comment_col].dropna().astype(str).tolist()
+            return comments
+            
+        except PermissionError as e:
+            print(f"Attempt {attempt + 1}: File is locked, retrying...")
+            if attempt == max_retries - 1:
+                print(f"Failed after {max_retries} attempts: {e}")
+                return []
+        except Exception as e:
+            print(f"Error loading Excel (attempt {attempt + 1}): {e}")
+            if attempt == max_retries - 1:
+                return []
+    
+    return []
+
+def cleanup_file_with_retry(file_path, max_retries=5):
+    """Cleanup file dengan retry untuk handle Windows file locking"""
+    for attempt in range(max_retries):
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"File cleaned up successfully: {file_path}")
+                return True
+        except PermissionError:
+            print(f"Cleanup attempt {attempt + 1}: File still locked, retrying in 1 second...")
+            time.sleep(1)
+        except Exception as e:
+            print(f"Cleanup error: {e}")
+            break
+    
+    print(f"Warning: Could not cleanup file {file_path}")
+    return False
+
 def load_comments_from_excel(file_path):
     """Load komentar dari file Excel"""
     try:
@@ -229,6 +310,7 @@ def index():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    filepath = None
     try:
         if 'file' not in request.files:
             return jsonify({'error': 'No file uploaded'}), 400
@@ -238,15 +320,23 @@ def upload_file():
             return jsonify({'error': 'No file selected'}), 400
         
         if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            # Generate unique filename to avoid conflicts
+            import uuid
+            unique_filename = f"{uuid.uuid4().hex}_{secure_filename(file.filename)}"
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+            
+            # Save file
             file.save(filepath)
             
-            # Load comments from Excel
-            comments = load_comments_from_excel(filepath)
+            # Load comments from Excel using file stream instead of file path
+            comments = load_comments_from_file_stream(file)
             
             if not comments:
-                return jsonify({'error': 'Tidak dapat membaca komentar dari file'}), 400
+                # Try reading from saved file with retry mechanism
+                comments = load_comments_with_retry(filepath)
+            
+            if not comments:
+                return jsonify({'error': 'Tidak dapat membaca komentar dari file. Pastikan file memiliki kolom Comment/AuthorComment.'}), 400
             
             # Perform sentiment analysis
             df_result, error = analyze_sentiment_backend(comments)
@@ -275,16 +365,17 @@ def upload_file():
                 ]
             }
             
-            # Cleanup uploaded file
-            os.remove(filepath)
-            
             return jsonify(response_data)
         
         else:
-            return jsonify({'error': 'File type not allowed'}), 400
+            return jsonify({'error': 'File type not allowed. Gunakan .xlsx atau .xls'}), 400
             
     except Exception as e:
         return jsonify({'error': f'Server error: {str(e)}'}), 500
+    finally:
+        # Cleanup uploaded file dengan retry
+        if filepath and os.path.exists(filepath):
+            cleanup_file_with_retry(filepath)
 
 @app.route('/health')
 def health_check():
