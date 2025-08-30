@@ -4,19 +4,23 @@
     {
       "src": "app.py",
       "use": "@vercel/python"
-    },
-    {
-      "src": "index.html",
-      "use": "@vercel/static"
     }
   ],
   "routes": [
     {
-      "src": "/",
-      "dest": "/index.html"
+      "src": "/health",
+      "dest": "/app.py"
     },
     {
-      "src": "/(scrape|upload|health)",
+      "src": "/scrape",
+      "dest": "/app.py"
+    },
+    {
+      "src": "/upload",
+      "dest": "/app.py"
+    },
+    {
+      "src": "/",
       "dest": "/app.py"
     },
     {
@@ -28,8 +32,5 @@
     "app.py": {
       "maxDuration": 30
     }
-  },
-  "env": {
-    "PYTHONPATH": "/var/task"
   }
 }

@@ -463,8 +463,7 @@ def health_check():
     })
 
 # Vercel serverless handler
-def handler(request):
-    return app(request)
+app.wsgi_app = app.wsgi_app
 
 if __name__ == '__main__':
     # For local development
