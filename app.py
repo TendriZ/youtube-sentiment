@@ -17,7 +17,15 @@ import threading
 from datetime import datetime
 
 app = Flask(__name__)
-CORS(app)
+CORS(
+    app,
+    origins=[
+        "https://youtube-sentiment-pi.vercel.app/",  # Ganti dengan domain GitHub Pages Anda
+        "https://*.vercel.app",  # Semua subdomain github.io
+        "http://localhost:*",  # Untuk testing lokal
+        "https://localhost:*"  # Untuk testing lokal HTTPS
+    ],
+    supports_credentials=True)
 
 # Configuration
 UPLOAD_FOLDER = 'uploads'
