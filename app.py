@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory, render_template_string
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 import numpy as np
 import pandas as pd
@@ -6,15 +6,9 @@ from scipy.sparse import csr_matrix, lil_matrix
 from collections import Counter
 import re
 import io
-import json
 import time
-import uuid
-from werkzeug.utils import secure_filename
-import os
-import openpyxl
-import requests
 from datetime import datetime
-import tempfile
+import requests
 
 app = Flask(__name__)
 CORS(app)
@@ -300,22 +294,8 @@ def load_comments_from_file_stream(file_obj):
     except Exception as e:
         return [], f"Error membaca file: {str(e)}"
 
-# Routes
-@app.route('/')
-def index():
-    """Serve the main HTML page"""
-    try:
-        with open('index.html', 'r', encoding='utf-8') as f:
-            html_content = f.read()
-        return html_content
-    except FileNotFoundError:
-        return jsonify({
-            'error': 'index.html not found',
-            'message': 'Upload index.html to root directory',
-            'available_endpoints': ['/scrape', '/upload', '/health']
-        }), 404
-
-@app.route('/scrape', methods=['POST'])
+# Routes (with /api prefix)
+@app.route('/api/scrape', methods=['POST'])
 def scrape_youtube():
     """Endpoint untuk scraping YouTube comments"""
     try:
@@ -390,7 +370,7 @@ def scrape_youtube():
         print(f"Scrape error: {e}")
         return jsonify({'error': f'Server error: {str(e)}'}), 500
 
-@app.route('/upload', methods=['POST'])
+@app.route('/api/upload', methods=['POST'])
 def upload_file():
     """Endpoint untuk upload dan analisis file Excel"""
     try:
@@ -447,7 +427,7 @@ def upload_file():
         print(f"Upload error: {e}")
         return jsonify({'error': f'Server error: {str(e)}'}), 500
 
-@app.route('/health')
+@app.route('/api/health')
 def health_check():
     """Health check endpoint"""
     return jsonify({
@@ -456,14 +436,11 @@ def health_check():
         'timestamp': datetime.now().isoformat(),
         'version': '1.0.0',
         'endpoints': {
-            'scrape': 'POST /scrape - YouTube comment scraping',
-            'upload': 'POST /upload - Excel file analysis', 
-            'health': 'GET /health - Health check'
+            'scrape': 'POST /api/scrape - YouTube comment scraping',
+            'upload': 'POST /api/upload - Excel file analysis', 
+            'health': 'GET /api/health - Health check'
         }
     })
-
-# Vercel serverless handler
-app.wsgi_app = app.wsgi_app
 
 if __name__ == '__main__':
     # For local development
