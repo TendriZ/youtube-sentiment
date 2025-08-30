@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template_string
+from flask import Flask, request, jsonify, send_from_directory, render_template_string
 from flask_cors import CORS
 import numpy as np
 import pandas as pd
@@ -13,26 +13,20 @@ from werkzeug.utils import secure_filename
 import os
 import openpyxl
 import requests
-import threading
 from datetime import datetime
+import tempfile
 
 app = Flask(__name__)
 CORS(app)
 
-# Configuration
-UPLOAD_FOLDER = 'uploads'
-ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
-MAX_CONTENT_LENGTH = 16 * 1024 * 1024
-
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
-
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+# Configuration for Vercel Serverless
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 def allowed_file(filename):
+    ALLOWED_EXTENSIONS = {'xlsx', 'xls'}
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# YouTube Scraping Functions
+# Simplified YouTube Scraping (tanpa yt-dlp karena tidak supported di Vercel)
 class YouTubeScraper:
     def __init__(self, api_key=None):
         self.api_key = api_key
@@ -52,7 +46,7 @@ class YouTubeScraper:
     
     def get_comments_api(self, video_id, max_comments=1000):
         if not self.api_key:
-            raise ValueError("API key required")
+            return [], "YouTube API key diperlukan untuk scraping di Vercel. Dapatkan gratis di Google Cloud Console."
         
         comments = []
         next_page_token = None
@@ -74,9 +68,11 @@ class YouTubeScraper:
                 response = requests.get(url, params=params, timeout=10)
                 
                 if response.status_code == 403:
-                    return [], "API quota exceeded or invalid API key"
+                    return [], "API quota exceeded atau API key tidak valid"
+                elif response.status_code == 404:
+                    return [], "Video tidak ditemukan atau komentar dinonaktifkan"
                 elif response.status_code != 200:
-                    return [], f"API Error: {response.status_code}"
+                    return [], f"YouTube API Error: {response.status_code}"
                 
                 data = response.json()
                 
@@ -95,63 +91,20 @@ class YouTubeScraper:
                     
                 time.sleep(0.1)  # Rate limiting
                 
+            except requests.RequestException as e:
+                return [], f"Network error: {str(e)}"
             except Exception as e:
                 return [], f"Error fetching comments: {str(e)}"
         
         return comments, None
 
-    def get_comments_yt_dlp(self, video_url, max_comments=1000):
-        try:
-            import yt_dlp
-        except ImportError:
-            return [], "yt-dlp not installed. Please install with: pip install yt-dlp"
-        
-        try:
-            ydl_opts = {
-                'getcomments': True,
-                'extractor_args': {
-                    'youtube': {
-                        'max_comments': f'{max_comments},{max_comments},0,0'  # max top-level, max parents, no replies, no per-thread
-                    }
-                },
-                'quiet': True,
-                'no_warnings': True,
-            }
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(video_url, download=False)
-                raw_comments = info.get('comments', [])
-            
-            # Map to standard format (only top-level)
-            comments = []
-            for c in raw_comments:
-                published_at = ''
-                if 'timestamp' in c and c['timestamp']:
-                    try:
-                        published_at = datetime.fromtimestamp(c['timestamp']).isoformat()
-                    except:
-                        pass
-                elif 'time_text' in c:
-                    published_at = c['time_text']
-                
-                comments.append({
-                    'comment': c.get('text', ''),
-                    'author': c.get('author', ''),
-                    'like_count': c.get('like_count', 0),
-                    'published_at': published_at
-                })
-            
-            return comments, None
-            
-        except Exception as e:
-            return [], f"yt-dlp error: {str(e)}"
-
-# Sentiment analysis functions (sama seperti sebelumnya)
+# Sentiment analysis functions (optimized untuk serverless)
 def preprocess(text):
-    if pd.isna(text):
+    if pd.isna(text) or not text:
         return []
     
     text = str(text).lower()
+    # Remove URLs, mentions, hashtags
     text = re.sub(r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', '', text)
     text = re.sub(r'@\w+', '', text)
     text = re.sub(r'#\w+', '', text)
@@ -161,15 +114,23 @@ def preprocess(text):
     words = [word for word in text.split() if len(word) > 2]
     return words
 
-def calculate_tfidf(processed_comments, max_features=3000, min_df=2):
+def calculate_tfidf(processed_comments, max_features=2000, min_df=2):
+    """Optimized TF-IDF for serverless environment"""
+    if not processed_comments:
+        return csr_matrix((0, 0)), {}
+    
     word_freq = Counter()
     for doc in processed_comments:
-        word_freq.update(set(doc))
+        if doc:
+            word_freq.update(set(doc))
     
     valid_words = [word for word, freq in word_freq.items() if freq >= min_df]
     
     if len(valid_words) > max_features:
         valid_words = [word for word, freq in word_freq.most_common(max_features)]
+    
+    if not valid_words:
+        return csr_matrix((len(processed_comments), 0)), {}
     
     word_to_idx = {word: i for i, word in enumerate(valid_words)}
     
@@ -194,45 +155,36 @@ def calculate_tfidf(processed_comments, max_features=3000, min_df=2):
     
     return tfidf.tocsr(), word_to_idx
 
-def kmeans(X, k=3, max_iter=50, random_state=42):
+def kmeans(X, k=3, max_iter=30, random_state=42):
+    """Optimized K-means for serverless"""
     np.random.seed(random_state)
     
-    if hasattr(X, 'toarray'):
-        if X.shape[0] > 5000:
-            sample_indices = np.random.choice(X.shape[0], min(1000, X.shape[0]), replace=False)
-            X_sample = X[sample_indices].toarray()
-            initial_centroids = X_sample[np.random.choice(X_sample.shape[0], k, replace=False)]
-        else:
-            X_dense = X.toarray()
-            initial_centroids = X_dense[np.random.choice(X_dense.shape[0], k, replace=False)]
-    else:
-        initial_centroids = X[np.random.choice(X.shape[0], k, replace=False)]
+    if X.shape[0] == 0 or X.shape[1] == 0:
+        return np.array([]), np.array([])
     
-    centroids = initial_centroids.astype(np.float32)
+    if X.shape[0] < k:
+        k = max(1, X.shape[0])
+    
+    if hasattr(X, 'toarray'):
+        X_dense = X.toarray().astype(np.float32)
+    else:
+        X_dense = X.astype(np.float32)
+    
+    # Initialize centroids
+    initial_centroids = X_dense[np.random.choice(X_dense.shape[0], k, replace=False)]
+    centroids = initial_centroids
     
     for iteration in range(max_iter):
-        if hasattr(X, 'toarray'):
-            distances = []
-            batch_size = 1000
-            for i in range(0, X.shape[0], batch_size):
-                batch = X[i:i+batch_size].toarray().astype(np.float32)
-                batch_distances = np.linalg.norm(batch[:, np.newaxis] - centroids, axis=2)
-                distances.append(batch_distances)
-            distances = np.vstack(distances)
-        else:
-            distances = np.linalg.norm(X[:, np.newaxis] - centroids, axis=2)
-        
+        # Calculate distances
+        distances = np.linalg.norm(X_dense[:, np.newaxis] - centroids, axis=2)
         labels = np.argmin(distances, axis=1)
         
+        # Update centroids
         new_centroids = []
         for i in range(k):
             mask = labels == i
             if np.any(mask):
-                if hasattr(X, 'toarray'):
-                    cluster_points = X[mask].toarray().astype(np.float32)
-                else:
-                    cluster_points = X[mask].astype(np.float32)
-                new_centroids.append(cluster_points.mean(axis=0))
+                new_centroids.append(X_dense[mask].mean(axis=0))
             else:
                 new_centroids.append(centroids[i])
         
@@ -246,21 +198,26 @@ def kmeans(X, k=3, max_iter=50, random_state=42):
     return labels, centroids
 
 def label_sentiments(centroids, word_to_idx):
+    """Indonesian sentiment labeling"""
     neg_words = {
         'hancur', 'bakar', 'bubar', 'korup', 'marah', 'sengsara', 'rusak', 
         'anarkis', 'jahat', 'bodoh', 'tolol', 'benci', 'kecewa', 'buruk', 
-        'jelek', 'gagal', 'sedih', 'stress', 'mampus'
+        'jelek', 'gagal', 'sedih', 'stress', 'mampus', 'parah', 'anjing'
     }
     
     pos_words = {
         'semangat', 'dukung', 'mantap', 'hebat', 'merdeka', 'bersatu', 
         'lindungi', 'bagus', 'baik', 'senang', 'bangga', 'optimis',
-        'sukses', 'berhasil', 'luar', 'biasa', 'keren', 'amazing'
+        'sukses', 'berhasil', 'luar', 'biasa', 'keren', 'amazing', 'love'
     }
     
     cluster_labels = []
     
     for i, centroid in enumerate(centroids):
+        if len(centroid) == 0:
+            cluster_labels.append('Netral')
+            continue
+            
         neg_score = sum(centroid[word_to_idx[w]] for w in neg_words if w in word_to_idx)
         pos_score = sum(centroid[word_to_idx[w]] for w in pos_words if w in word_to_idx)
         
@@ -274,16 +231,24 @@ def label_sentiments(centroids, word_to_idx):
     return cluster_labels
 
 def analyze_sentiment_backend(comments, k_clusters=3):
+    """Main sentiment analysis function"""
+    if not comments:
+        return None, "Tidak ada komentar untuk dianalisis"
+    
     processed_comments = [preprocess(c) for c in comments]
     
     valid_indices = [i for i, doc in enumerate(processed_comments) if len(doc) > 0]
+    if not valid_indices:
+        return None, "Tidak ada komentar valid setelah preprocessing"
+    
     comments = [comments[i] for i in valid_indices]
     processed_comments = [processed_comments[i] for i in valid_indices]
     
-    if len(comments) == 0:
-        return None, "Tidak ada komentar valid setelah preprocessing"
-    
     tfidf_matrix, word_to_idx = calculate_tfidf(processed_comments)
+    
+    if tfidf_matrix.shape[1] == 0:
+        return None, "Tidak dapat mengekstrak fitur dari komentar"
+    
     labels, centroids = kmeans(tfidf_matrix, k=k_clusters)
     cluster_sentiments = label_sentiments(centroids, word_to_idx)
     sentiments = [cluster_sentiments[label] for label in labels]
@@ -296,13 +261,24 @@ def analyze_sentiment_backend(comments, k_clusters=3):
     
     return df_result, None
 
-# File handling functions (yang sudah diperbaiki)
 def load_comments_from_file_stream(file_obj):
+    """Load comments from uploaded Excel file"""
     try:
         file_obj.seek(0)
-        df = pd.read_excel(file_obj.stream)
         
-        comment_columns = ['comment', 'Comment', 'AuthorComment', 'text', 'Text', 'Komentar']
+        # Try reading with different engines
+        try:
+            df = pd.read_excel(file_obj, engine='openpyxl')
+        except:
+            try:
+                df = pd.read_excel(file_obj, engine='xlrd')
+            except:
+                return [], "Format file Excel tidak didukung"
+        
+        if df.empty:
+            return [], "File Excel kosong"
+        
+        comment_columns = ['comment', 'Comment', 'AuthorComment', 'text', 'Text', 'Komentar', 'comments']
         comment_col = None
         
         for col in comment_columns:
@@ -311,81 +287,82 @@ def load_comments_from_file_stream(file_obj):
                 break
         
         if comment_col is None:
-            return []
+            available_cols = ', '.join(df.columns.tolist())
+            return [], f"Kolom komentar tidak ditemukan. Kolom yang tersedia: {available_cols}. Gunakan salah satu nama: {', '.join(comment_columns)}"
         
         comments = df[comment_col].dropna().astype(str).tolist()
-        return comments
+        
+        if not comments:
+            return [], f"Tidak ada data di kolom '{comment_col}'"
+        
+        return comments, None
         
     except Exception as e:
-        print(f"Error loading from stream: {e}")
-        return []
-
-def cleanup_file_with_retry(file_path, max_retries=5):
-    for attempt in range(max_retries):
-        try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                return True
-        except PermissionError:
-            time.sleep(2)
-        except Exception as e:
-            print(f"Cleanup error: {e}")
-            break
-    return False
+        return [], f"Error membaca file: {str(e)}"
 
 # Routes
 @app.route('/')
 def index():
-    with open('index.html', 'r', encoding='utf-8') as f:
-        html_content = f.read()
-    return html_content
+    """Serve the main HTML page"""
+    try:
+        with open('index.html', 'r', encoding='utf-8') as f:
+            html_content = f.read()
+        return html_content
+    except FileNotFoundError:
+        return jsonify({
+            'error': 'index.html not found',
+            'message': 'Upload index.html to root directory',
+            'available_endpoints': ['/scrape', '/upload', '/health']
+        }), 404
 
 @app.route('/scrape', methods=['POST'])
 def scrape_youtube():
     """Endpoint untuk scraping YouTube comments"""
     try:
         data = request.get_json()
-        video_url = data.get('video_url', '')
-        max_comments = data.get('max_comments', 500)
-        api_key = data.get('api_key', '')
-        method = data.get('method', 'yt-dlp')  # Default ke yt-dlp
+        if not data:
+            return jsonify({'error': 'Invalid JSON data'}), 400
+            
+        video_url = data.get('video_url', '').strip()
+        max_comments = min(int(data.get('max_comments', 500)), 1000)  # Limit for serverless
+        api_key = data.get('api_key', '').strip()
         
         if not video_url:
             return jsonify({'error': 'URL video YouTube diperlukan'}), 400
         
-        scraper = YouTubeScraper(api_key=api_key if api_key else None)
+        if not api_key:
+            return jsonify({
+                'error': 'YouTube API key diperlukan untuk scraping di Vercel Serverless', 
+                'info': 'Dapatkan API key gratis di Google Cloud Console > YouTube Data API v3',
+                'tutorial': 'https://developers.google.com/youtube/v3/getting-started'
+            }), 400
         
-        # Extract video ID
+        scraper = YouTubeScraper(api_key=api_key)
+        
         video_id = scraper.extract_video_id(video_url)
         if not video_id:
             return jsonify({'error': 'URL YouTube tidak valid'}), 400
         
-        print(f"Scraping video ID: {video_id} with method: {method}")
+        print(f"Scraping video ID: {video_id}")
         
-        # Scrape based on method
-        if method == 'api' and api_key:
-            comments_data, error = scraper.get_comments_api(video_id, max_comments)
-        elif method == 'yt-dlp':
-            comments_data, error = scraper.get_comments_yt_dlp(video_url, max_comments)
-        else:
-            return jsonify({'error': 'Method tidak didukung atau API key hilang untuk method API'}), 400
+        comments_data, error = scraper.get_comments_api(video_id, max_comments)
         
         if error:
             return jsonify({'error': error}), 400
         
         if not comments_data:
-            return jsonify({'error': 'Tidak dapat mengambil komentar dari video'}), 400
+            return jsonify({'error': 'Tidak dapat mengambil komentar dari video. Pastikan video publik dan komentar tidak dinonaktifkan.'}), 400
         
-        # Extract comment text
         comments = [item['comment'] for item in comments_data if item.get('comment')]
         
-        # Perform sentiment analysis
+        if len(comments) < 3:
+            return jsonify({'error': 'Terlalu sedikit komentar untuk dianalisis (minimal 3)'}), 400
+        
         df_result, error = analyze_sentiment_backend(comments)
         
         if error:
             return jsonify({'error': error}), 400
         
-        # Prepare response data
         sentiment_counts = df_result['Sentiment'].value_counts()
         cluster_counts = df_result['Cluster'].value_counts()
         
@@ -407,27 +384,6 @@ def scrape_youtube():
             ]
         }
         
-        # Save scraped data to Excel
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"scraped_comments_{video_id}_{timestamp}.xlsx"
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
-            
-            # Combine original data with sentiment results
-            full_df = pd.DataFrame(comments_data)
-            full_df = full_df.merge(
-                df_result.reset_index().rename(columns={'index': 'comment_index'}),
-                left_index=True,
-                right_on='comment_index',
-                how='left'
-            )
-            
-            full_df.to_excel(filepath, index=False)
-            response_data['savedFile'] = filename
-            
-        except Exception as e:
-            print(f"Error saving scraped data: {e}")
-        
         return jsonify(response_data)
         
     except Exception as e:
@@ -436,70 +392,80 @@ def scrape_youtube():
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    filepath = None
+    """Endpoint untuk upload dan analisis file Excel"""
     try:
         if 'file' not in request.files:
-            return jsonify({'error': 'No file uploaded'}), 400
+            return jsonify({'error': 'Tidak ada file yang diupload'}), 400
         
         file = request.files['file']
         if file.filename == '':
-            return jsonify({'error': 'No file selected'}), 400
+            return jsonify({'error': 'Tidak ada file yang dipilih'}), 400
         
-        if file and allowed_file(file.filename):
-            unique_filename = f"{uuid.uuid4().hex}_{secure_filename(file.filename)}"
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
-            
-            # Try reading from stream first
-            comments = load_comments_from_file_stream(file)
-            
-            if not comments:
-                return jsonify({'error': 'Tidak dapat membaca komentar dari file'}), 400
-            
-            df_result, error = analyze_sentiment_backend(comments)
-            
-            if error:
-                return jsonify({'error': error}), 400
-            
-            sentiment_counts = df_result['Sentiment'].value_counts()
-            cluster_counts = df_result['Cluster'].value_counts()
-            
-            sample_data = df_result.head(50).to_dict('records')
-            
-            response_data = {
-                'totalComments': len(df_result),
-                'sentiments': sentiment_counts.to_dict(),
-                'clusters': {f'Cluster {k}': v for k, v in cluster_counts.to_dict().items()},
-                'sampleData': [
-                    {
-                        'comment': row['Comment'][:100] + '...' if len(row['Comment']) > 100 else row['Comment'],
-                        'sentiment': row['Sentiment'],
-                        'cluster': row['Cluster']
-                    }
-                    for row in sample_data
-                ]
-            }
-            
-            return jsonify(response_data)
+        if not file or not allowed_file(file.filename):
+            return jsonify({'error': 'Format file tidak didukung. Gunakan file .xlsx atau .xls'}), 400
         
-        else:
-            return jsonify({'error': 'File type not allowed'}), 400
-            
+        # Load comments from file
+        comments, error = load_comments_from_file_stream(file)
+        
+        if error:
+            return jsonify({'error': error}), 400
+        
+        if not comments:
+            return jsonify({'error': 'Tidak dapat membaca komentar dari file'}), 400
+        
+        if len(comments) < 3:
+            return jsonify({'error': f'Terlalu sedikit komentar untuk dianalisis ({len(comments)} komentar, minimal 3)'}), 400
+        
+        # Perform sentiment analysis
+        df_result, error = analyze_sentiment_backend(comments)
+        
+        if error:
+            return jsonify({'error': error}), 400
+        
+        sentiment_counts = df_result['Sentiment'].value_counts()
+        cluster_counts = df_result['Cluster'].value_counts()
+        
+        sample_data = df_result.head(50).to_dict('records')
+        
+        response_data = {
+            'totalComments': len(df_result),
+            'sentiments': sentiment_counts.to_dict(),
+            'clusters': {f'Cluster {k}': v for k, v in cluster_counts.to_dict().items()},
+            'sampleData': [
+                {
+                    'comment': row['Comment'][:100] + '...' if len(row['Comment']) > 100 else row['Comment'],
+                    'sentiment': row['Sentiment'],
+                    'cluster': row['Cluster']
+                }
+                for row in sample_data
+            ]
+        }
+        
+        return jsonify(response_data)
+        
     except Exception as e:
+        print(f"Upload error: {e}")
         return jsonify({'error': f'Server error: {str(e)}'}), 500
-    finally:
-        if filepath and os.path.exists(filepath):
-            cleanup_file_with_retry(filepath)
 
 @app.route('/health')
 def health_check():
-    return jsonify({'status': 'healthy'})
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'healthy',
+        'message': 'YouTube Sentiment Analysis API is running on Vercel',
+        'timestamp': datetime.now().isoformat(),
+        'version': '1.0.0',
+        'endpoints': {
+            'scrape': 'POST /scrape - YouTube comment scraping',
+            'upload': 'POST /upload - Excel file analysis', 
+            'health': 'GET /health - Health check'
+        }
+    })
+
+# Vercel serverless handler
+def handler(request):
+    return app(request)
 
 if __name__ == '__main__':
-    print("YouTube Sentiment Analysis Server")
-    print("Required packages:")
-    print("pip install flask flask-cors pandas numpy scipy openpyxl requests")
-    print("\nOptional for advanced scraping:")
-    print("pip install yt-dlp selenium")
-    print("\nServer starting on http://localhost:5000")
-    
+    # For local development
     app.run(debug=True, host='0.0.0.0', port=5000)
