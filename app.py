@@ -290,7 +290,7 @@ def cleanup_file_with_retry(file_path, max_retries=5):
 # Routes
 @app.route('/')
 def index():
-    with open('sentiment_analysis.html', 'r', encoding='utf-8') as f:
+    with open('index.html', 'r', encoding='utf-8') as f:
         html_content = f.read()
     return html_content
 
