@@ -46,12 +46,75 @@
             opacity: 0.9;
         }
 
-        .upload-section {
+        .input-section {
             background: white;
             border-radius: 15px;
             padding: 30px;
             margin-bottom: 30px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e9ecef;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 15px;
+            background: #f8f9fa;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .tab.active {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+        }
+
+        .tab:hover {
+            background: #e9ecef;
+        }
+
+        .tab.active:hover {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .input-group input[type="text"],
+        .input-group input[type="number"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.3s ease;
+        }
+
+        .input-group input:focus {
+            outline: none;
+            border-color: #667eea;
         }
 
         .file-input-wrapper {
@@ -101,6 +164,30 @@
         }
 
         .analyze-btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .scrape-btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(45deg, #dc3545, #e91e63);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            margin-top: 15px;
+            transition: transform 0.3s ease;
+        }
+
+        .scrape-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .scrape-btn:disabled {
             background: #6c757d;
             cursor: not-allowed;
             transform: none;
@@ -273,6 +360,15 @@
             border: 1px solid #c3e6cb;
         }
 
+        .info-message {
+            background: #d1ecf1;
+            color: #0c5460;
+            padding: 15px;
+            border-radius: 10px;
+            margin: 15px 0;
+            border: 1px solid #bee5eb;
+        }
+
         .footer {
             text-align: center;
             padding: 20px;
@@ -296,6 +392,10 @@
             .chart-container {
                 min-width: 300px;
             }
+
+            .tabs {
+                flex-direction: column;
+            }
         }
     </style>
 </head>
@@ -303,41 +403,79 @@
     <div class="container">
         <div class="header">
             <h1>Analisis Sentimen Komentar YouTube</h1>
-            <p>Upload file Excel dengan komentar YouTube untuk analisis sentimen otomatis menggunakan K-Means Clustering</p>
+            <p>Scraping langsung dari YouTube atau upload file Excel untuk analisis sentimen menggunakan K-Means Clustering</p>
         </div>
 
-        <div class="upload-section">
-            <h3>Upload File Excel</h3>
-            <p>Format yang didukung: .xlsx, .xls dengan kolom 'Comment' atau 'AuthorComment'</p>
-            
-            <div class="file-input-wrapper">
-                <input type="file" id="fileInput" class="file-input" accept=".xlsx,.xls" />
-                <label for="fileInput" class="file-input-button">
-                    Pilih File Excel
-                </label>
+        <div class="input-section">
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('scrape')">Scraping YouTube</button>
+                <button class="tab" onclick="switchTab('upload')">Upload Excel</button>
             </div>
-            
-            <div id="fileInfo" style="margin-top: 10px; color: #666;"></div>
-            <div id="errorMessage" class="error-message" style="display: none;"></div>
-            <div id="successMessage" class="success-message" style="display: none;"></div>
-            
-            <button id="analyzeBtn" class="analyze-btn" disabled>
-                Mulai Analisis Sentimen
-            </button>
+
+            <!-- YouTube Scraping Tab -->
+            <div id="scrapeTab" class="tab-content active">
+                <h3>Scraping Komentar dari YouTube</h3>
+                <p>Masukkan URL video YouTube untuk mengambil komentar secara langsung</p>
+                
+                <div class="input-group">
+                    <label for="videoUrl">URL Video YouTube</label>
+                    <input type="text" id="videoUrl" placeholder="https://www.youtube.com/watch?v=..." />
+                </div>
+                
+                <div class="input-group">
+                    <label for="apiKey">YouTube API Key (Opsional tapi Disarankan)</label>
+                    <input type="text" id="apiKey" placeholder="Masukkan API key untuk hasil yang lebih stabil" />
+                </div>
+                
+                <div class="input-group">
+                    <label for="maxComments">Maksimal Komentar</label>
+                    <input type="number" id="maxComments" value="500" min="10" max="5000" />
+                </div>
+                
+                <div id="scrapeInfo" class="info-message" style="display: none;"></div>
+                <div id="scrapeError" class="error-message" style="display: none;"></div>
+                <div id="scrapeSuccess" class="success-message" style="display: none;"></div>
+                
+                <button id="scrapeBtn" class="scrape-btn">
+                    Scrape & Analisis Komentar YouTube
+                </button>
+            </div>
+
+            <!-- File Upload Tab -->
+            <div id="uploadTab" class="tab-content">
+                <h3>Upload File Excel</h3>
+                <p>Format yang didukung: .xlsx, .xls dengan kolom 'Comment' atau 'AuthorComment'</p>
+                
+                <div class="file-input-wrapper">
+                    <input type="file" id="fileInput" class="file-input" accept=".xlsx,.xls" />
+                    <label for="fileInput" class="file-input-button">
+                        Pilih File Excel
+                    </label>
+                </div>
+                
+                <div id="fileInfo" style="margin-top: 10px; color: #666;"></div>
+                <div id="uploadError" class="error-message" style="display: none;"></div>
+                <div id="uploadSuccess" class="success-message" style="display: none;"></div>
+                
+                <button id="analyzeBtn" class="analyze-btn" disabled>
+                    Mulai Analisis Sentimen
+                </button>
+            </div>
         </div>
 
         <div class="loading" id="loading">
             <div class="spinner"></div>
-            <h3>Menganalisis komentar...</h3>
-            <p>Mohon tunggu, proses ini dapat memakan waktu beberapa menit</p>
+            <h3 id="loadingTitle">Menganalisis komentar...</h3>
+            <p id="loadingDescription">Mohon tunggu, proses ini dapat memakan waktu beberapa menit</p>
             <div class="progress-bar">
                 <div class="progress-fill" id="progressFill"></div>
             </div>
-            <div id="loadingStatus">Memproses file...</div>
+            <div id="loadingStatus">Memproses...</div>
         </div>
 
         <div class="results-section" id="results">
             <h2>Hasil Analisis Sentimen</h2>
+            <div id="resultInfo" class="info-message" style="display: none;"></div>
             
             <div class="stats-grid">
                 <div class="stat-card">
@@ -398,7 +536,7 @@
         </div>
 
         <div class="footer">
-            <p>© 2025 Analisis Sentimen - Powered by K-Means Clustering & TF-IDF</p>
+            <p>© 2025 Analisis Sentimen - YouTube Scraping & K-Means Clustering</p>
         </div>
     </div>
 
@@ -406,32 +544,67 @@
         // Global variables
         let analysisResults = null;
         let charts = {};
-        const API_BASE_URL = 'http://localhost:5000'; // Flask backend URL
+        const API_BASE_URL = 'http://localhost:5000';
+
+        // Tab switching
+        function switchTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelector(`button[onclick="switchTab('${tabName}')"]`).classList.add('active');
+            
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            document.getElementById(tabName + 'Tab').classList.add('active');
+            
+            // Hide all messages when switching tabs
+            hideAllMessages();
+        }
+
+        function hideAllMessages() {
+            const messages = ['scrapeError', 'scrapeSuccess', 'scrapeInfo', 'uploadError', 'uploadSuccess'];
+            messages.forEach(id => {
+                document.getElementById(id).style.display = 'none';
+            });
+        }
+
+        function showMessage(type, message, tabPrefix = '') {
+            hideAllMessages();
+            const messageDiv = document.getElementById(tabPrefix + type);
+            if (messageDiv) {
+                messageDiv.textContent = message;
+                messageDiv.style.display = 'block';
+            }
+        }
+
+        // YouTube URL validation
+        function isValidYouTubeUrl(url) {
+            const patterns = [
+                /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([^&\n?#]+)/,
+                /youtube\.com\/watch\?.*v=([^&\n?#]+)/
+            ];
+            return patterns.some(pattern => pattern.test(url));
+        }
 
         // File input handling
         document.getElementById('fileInput').addEventListener('change', function(e) {
             const file = e.target.files[0];
             const fileInfo = document.getElementById('fileInfo');
             const analyzeBtn = document.getElementById('analyzeBtn');
-            const errorMessage = document.getElementById('errorMessage');
             
-            // Hide previous messages
-            errorMessage.style.display = 'none';
+            hideAllMessages();
             
             if (file) {
                 const fileSize = (file.size / 1024 / 1024).toFixed(2);
                 
-                // Check file size (max 16MB)
                 if (file.size > 16 * 1024 * 1024) {
-                    showError('Ukuran file terlalu besar. Maksimal 16MB.');
+                    showMessage('Error', 'Ukuran file terlalu besar. Maksimal 16MB.', 'upload');
                     analyzeBtn.disabled = true;
                     return;
                 }
                 
-                // Check file type
                 const allowedTypes = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'];
                 if (!allowedTypes.includes(file.type) && !file.name.match(/\.(xlsx|xls)$/i)) {
-                    showError('Format file tidak didukung. Gunakan file .xlsx atau .xls');
+                    showMessage('Error', 'Format file tidak didukung. Gunakan file .xlsx atau .xls', 'upload');
                     analyzeBtn.disabled = true;
                     return;
                 }
@@ -444,48 +617,99 @@
             }
         });
 
-        // Analyze button handling
+        // YouTube scraping
+        document.getElementById('scrapeBtn').addEventListener('click', function() {
+            const videoUrl = document.getElementById('videoUrl').value.trim();
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const maxComments = parseInt(document.getElementById('maxComments').value) || 500;
+            
+            if (!videoUrl) {
+                showMessage('Error', 'Masukkan URL video YouTube', 'scrape');
+                return;
+            }
+            
+            if (!isValidYouTubeUrl(videoUrl)) {
+                showMessage('Error', 'URL YouTube tidak valid', 'scrape');
+                return;
+            }
+            
+            if (!apiKey) {
+                showMessage('Info', 'Tanpa API key, hasil mungkin terbatas. Dapatkan API key gratis di Google Cloud Console.', 'scrape');
+            }
+            
+            scrapeYouTube(videoUrl, apiKey, maxComments);
+        });
+
+        // File upload analysis
         document.getElementById('analyzeBtn').addEventListener('click', function() {
             const fileInput = document.getElementById('fileInput');
             const file = fileInput.files[0];
             
             if (!file) {
-                showError('Silakan pilih file Excel terlebih dahulu');
+                showMessage('Error', 'Silakan pilih file Excel terlebih dahulu', 'upload');
                 return;
             }
             
             uploadAndAnalyze(file);
         });
 
-        function showError(message) {
-            const errorDiv = document.getElementById('errorMessage');
-            errorDiv.textContent = message;
-            errorDiv.style.display = 'block';
-        }
-
-        function showSuccess(message) {
-            const successDiv = document.getElementById('successMessage');
-            successDiv.textContent = message;
-            successDiv.style.display = 'block';
-        }
-
-        function hideMessages() {
-            document.getElementById('errorMessage').style.display = 'none';
-            document.getElementById('successMessage').style.display = 'none';
+        async function scrapeYouTube(videoUrl, apiKey, maxComments) {
+            hideAllMessages();
+            
+            // Show loading
+            document.getElementById('loadingTitle').textContent = 'Scraping komentar YouTube...';
+            document.getElementById('loadingDescription').textContent = 'Mengambil komentar dari video dan melakukan analisis sentimen';
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('results').style.display = 'none';
+            
+            simulateProgress(['Validating video...', 'Scraping comments...', 'Processing data...', 'Analyzing sentiment...']);
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/scrape`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        video_url: videoUrl,
+                        api_key: apiKey,
+                        max_comments: maxComments,
+                        method: apiKey ? 'api' : 'yt-dlp'
+                    })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Terjadi kesalahan saat scraping');
+                }
+                
+                const data = await response.json();
+                analysisResults = data;
+                
+                setTimeout(() => {
+                    document.getElementById('loading').style.display = 'none';
+                    showResults('scrape');
+                }, 2000);
+                
+            } catch (error) {
+                document.getElementById('loading').style.display = 'none';
+                showMessage('Error', `Error: ${error.message}`, 'scrape');
+                console.error('Scraping error:', error);
+            }
         }
 
         async function uploadAndAnalyze(file) {
-            hideMessages();
+            hideAllMessages();
             
-            // Show loading
+            document.getElementById('loadingTitle').textContent = 'Menganalisis file Excel...';
+            document.getElementById('loadingDescription').textContent = 'Memproses file dan melakukan analisis sentimen';
             document.getElementById('loading').style.display = 'block';
             document.getElementById('results').style.display = 'none';
             
             const formData = new FormData();
             formData.append('file', file);
             
-            // Simulate progress
-            simulateProgress();
+            simulateProgress(['Reading Excel file...', 'Preprocessing comments...', 'TF-IDF calculation...', 'K-Means clustering...', 'Sentiment labeling...']);
             
             try {
                 const response = await fetch(`${API_BASE_URL}/upload`, {
@@ -501,29 +725,19 @@
                 const data = await response.json();
                 analysisResults = data;
                 
-                // Hide loading and show results
                 setTimeout(() => {
                     document.getElementById('loading').style.display = 'none';
-                    showResults();
-                }, 2000); // Give time for progress animation to complete
+                    showResults('upload');
+                }, 2000);
                 
             } catch (error) {
                 document.getElementById('loading').style.display = 'none';
-                showError(`Error: ${error.message}`);
+                showMessage('Error', `Error: ${error.message}`, 'upload');
                 console.error('Analysis error:', error);
             }
         }
 
-        function simulateProgress() {
-            const steps = [
-                'Membaca file Excel...',
-                'Preprocessing komentar...',
-                'Menghitung TF-IDF...',
-                'Melakukan K-Means clustering...',
-                'Menentukan sentimen...',
-                'Generating visualisasi...'
-            ];
-            
+        function simulateProgress(steps) {
             let currentStep = 0;
             const progressFill = document.getElementById('progressFill');
             const statusDiv = document.getElementById('loadingStatus');
@@ -540,10 +754,19 @@
             }, 1500);
         }
 
-        function showResults() {
+        function showResults(source) {
             if (!analysisResults) return;
             
             document.getElementById('results').style.display = 'block';
+            
+            // Show result info
+            const resultInfo = document.getElementById('resultInfo');
+            if (analysisResults.videoId) {
+                resultInfo.textContent = `Hasil scraping video ID: ${analysisResults.videoId} pada ${new Date(analysisResults.scrapedAt).toLocaleString()}`;
+            } else {
+                resultInfo.textContent = `Hasil analisis file Excel dengan ${analysisResults.totalComments} komentar`;
+            }
+            resultInfo.style.display = 'block';
             
             // Update statistics
             document.getElementById('totalComments').textContent = analysisResults.totalComments.toLocaleString();
@@ -557,8 +780,12 @@
             // Populate table
             populateTable();
             
-            // Show success message and scroll to results
-            showSuccess(`Analisis berhasil! ${analysisResults.totalComments} komentar telah diproses.`);
+            // Show success message
+            const successMessage = source === 'scrape' ? 
+                `Scraping berhasil! ${analysisResults.totalComments} komentar telah dianalisis.` :
+                `Analisis berhasil! ${analysisResults.totalComments} komentar telah diproses.`;
+            
+            showMessage('Success', successMessage, source);
             document.getElementById('results').scrollIntoView({ behavior: 'smooth' });
         }
 
@@ -725,7 +952,7 @@
             });
         }
 
-        // Health check function to test backend connection
+        // Health check function
         async function checkBackendHealth() {
             try {
                 const response = await fetch(`${API_BASE_URL}/health`);
@@ -738,15 +965,19 @@
                 }
             } catch (error) {
                 console.error('Backend connection error:', error);
-                showError('Tidak dapat terhubung ke server. Pastikan Flask backend sudah berjalan di http://localhost:5000');
+                showMessage('Error', 'Tidak dapat terhubung ke server. Pastikan Flask backend sudah berjalan di http://localhost:5000', 'scrape');
                 return false;
             }
         }
 
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('Sentiment Analysis Website Loaded');
+            console.log('YouTube Sentiment Analysis Website Loaded');
             checkBackendHealth();
+            
+            // Set default values
+            document.getElementById('videoUrl').placeholder = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+            document.getElementById('maxComments').value = 500;
         });
     </script>
 </body>
