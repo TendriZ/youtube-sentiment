@@ -423,8 +423,8 @@
                 </div>
                 
                 <div class="input-group">
-                    <label for="apiKey">YouTube API Key (AIzaSyC4lYM7zkw5sx53kLyomX6b_TLTOTbX7sQ)</label>
-                    <input type="text" id="apiKey" placeholder="Copy API KEY di atas" />
+                    <label for="apiKey">YouTube API Key (opsional untuk scraping lanjutan)</label>
+                    <input type="text" id="apiKey" placeholder="Masukkan API key Anda jika tersedia" />
                 </div>
                 
                 <div class="input-group">
@@ -536,7 +536,7 @@
         </div>
 
         <div class="footer">
-            <p>© 2025 Analisis Sentimen - YouTube Scraping & K-Means Clustering - All Right Reserved - Raka</p>
+            <p id="footerText">© Analisis Sentimen - YouTube Scraping & K-Means Clustering - All Rights Reserved - Raka</p>
         </div>
     </div>
 
@@ -563,7 +563,8 @@
         function hideAllMessages() {
             const messages = ['scrapeError', 'scrapeSuccess', 'scrapeInfo', 'uploadError', 'uploadSuccess'];
             messages.forEach(id => {
-                document.getElementById(id).style.display = 'none';
+                const el = document.getElementById(id);
+                if (el) el.style.display = 'none';
             });
         }
 
@@ -634,7 +635,7 @@
             }
             
             if (!apiKey) {
-                showMessage('Info', 'Tanpa API key, hasil mungkin terbatas. Dapatkan API key gratis di Google Cloud Console.', 'scrape');
+                showMessage('Info', 'Tanpa API key, menggunakan yt-dlp (hasil mungkin terbatas pada komentar terbaru). Dapatkan API key gratis di Google Cloud Console.', 'scrape');
             }
             
             scrapeYouTube(videoUrl, apiKey, maxComments);
@@ -768,11 +769,11 @@
             }
             resultInfo.style.display = 'block';
             
-            // Update statistics
-            document.getElementById('totalComments').textContent = analysisResults.totalComments.toLocaleString();
-            document.getElementById('positifCount').textContent = (analysisResults.sentiments['Positif'] || 0).toLocaleString();
-            document.getElementById('negatifCount').textContent = (analysisResults.sentiments['Negatif'] || 0).toLocaleString();
-            document.getElementById('netralCount').textContent = (analysisResults.sentiments['Netral'] || 0).toLocaleString();
+            // Update statistics with fallback to 0
+            document.getElementById('totalComments').textContent = (analysisResults.totalComments || 0).toLocaleString();
+            document.getElementById('positifCount').textContent = (analysisResults.sentiments?.['Positif'] || 0).toLocaleString();
+            document.getElementById('negatifCount').textContent = (analysisResults.sentiments?.['Negatif'] || 0).toLocaleString();
+            document.getElementById('netralCount').textContent = (analysisResults.sentiments?.['Netral'] || 0).toLocaleString();
             
             // Create charts
             createCharts();
@@ -797,8 +798,8 @@
                 if (chart) chart.destroy();
             });
             
-            const sentiments = analysisResults.sentiments;
-            const clusters = analysisResults.clusters;
+            const sentiments = analysisResults.sentiments || {};
+            const clusters = analysisResults.clusters || {};
             
             // Pie Chart
             const pieCtx = document.getElementById('pieChart').getContext('2d');
@@ -874,7 +875,7 @@
                 }
             });
             
-            // Line Chart (Trend simulation)
+            // Line Chart (Use real trend if available, else simulate)
             const lineCtx = document.getElementById('lineChart').getContext('2d');
             const trendData = generateTrendData();
             charts.line = new Chart(lineCtx, {
@@ -922,6 +923,11 @@
         }
 
         function generateTrendData() {
+            if (analysisResults.trendData) {
+                return analysisResults.trendData;
+            }
+            
+            // Fallback to random if no real data
             const labels = ['Jam 1', 'Jam 2', 'Jam 3', 'Jam 4', 'Jam 5', 'Jam 6'];
             const positif = labels.map(() => Math.floor(Math.random() * 100) + 50);
             const negatif = labels.map(() => Math.floor(Math.random() * 100) + 50);
@@ -931,7 +937,11 @@
         }
 
         function populateTable() {
-            if (!analysisResults || !analysisResults.sampleData) return;
+            if (!analysisResults || !analysisResults.sampleData || analysisResults.sampleData.length === 0) {
+                const tableBody = document.getElementById('tableBody');
+                tableBody.innerHTML = '<tr><td colspan="4" style="text-align: center;">Tidak ada sample data tersedia</td></tr>';
+                return;
+            }
             
             const tableBody = document.getElementById('tableBody');
             tableBody.innerHTML = '';
@@ -978,6 +988,10 @@
             // Set default values
             document.getElementById('videoUrl').placeholder = 'Insert YouTube video URL here';
             document.getElementById('maxComments').value = 500;
+            
+            // Update footer year dynamically
+            const currentYear = new Date().getFullYear();
+            document.getElementById('footerText').textContent = `© ${currentYear} Analisis Sentimen - YouTube Scraping & K-Means Clustering - All Rights Reserved - Raka`;
         });
     </script>
 </body>

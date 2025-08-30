@@ -100,6 +100,52 @@ class YouTubeScraper:
         
         return comments, None
 
+    def get_comments_yt_dlp(self, video_url, max_comments=1000):
+        try:
+            import yt_dlp
+        except ImportError:
+            return [], "yt-dlp not installed. Please install with: pip install yt-dlp"
+        
+        try:
+            ydl_opts = {
+                'getcomments': True,
+                'extractor_args': {
+                    'youtube': {
+                        'max_comments': f'{max_comments},{max_comments},0,0'  # max top-level, max parents, no replies, no per-thread
+                    }
+                },
+                'quiet': True,
+                'no_warnings': True,
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(video_url, download=False)
+                raw_comments = info.get('comments', [])
+            
+            # Map to standard format (only top-level)
+            comments = []
+            for c in raw_comments:
+                published_at = ''
+                if 'timestamp' in c and c['timestamp']:
+                    try:
+                        published_at = datetime.fromtimestamp(c['timestamp']).isoformat()
+                    except:
+                        pass
+                elif 'time_text' in c:
+                    published_at = c['time_text']
+                
+                comments.append({
+                    'comment': c.get('text', ''),
+                    'author': c.get('author', ''),
+                    'like_count': c.get('like_count', 0),
+                    'published_at': published_at
+                })
+            
+            return comments, None
+            
+        except Exception as e:
+            return [], f"yt-dlp error: {str(e)}"
+
 # Sentiment analysis functions (sama seperti sebelumnya)
 def preprocess(text):
     if pd.isna(text):
@@ -296,13 +342,13 @@ def index():
 
 @app.route('/scrape', methods=['POST'])
 def scrape_youtube():
-    """New endpoint untuk scraping YouTube comments"""
+    """Endpoint untuk scraping YouTube comments"""
     try:
         data = request.get_json()
         video_url = data.get('video_url', '')
         max_comments = data.get('max_comments', 500)
         api_key = data.get('api_key', '')
-        method = data.get('method', 'yt-dlp')  # default ke yt-dlp
+        method = data.get('method', 'yt-dlp')  # Default ke yt-dlp
         
         if not video_url:
             return jsonify({'error': 'URL video YouTube diperlukan'}), 400
@@ -319,11 +365,13 @@ def scrape_youtube():
         # Scrape based on method
         if method == 'api' and api_key:
             comments_data, error = scraper.get_comments_api(video_id, max_comments)
-            if error:
-                return jsonify({'error': error}), 400
+        elif method == 'yt-dlp':
+            comments_data, error = scraper.get_comments_yt_dlp(video_url, max_comments)
         else:
-            # Fallback ke sample data jika method lain belum diimplementasi
-            return jsonify({'error': 'Hanya API method yang tersedia saat ini. Silakan masukkan API key.'}), 400
+            return jsonify({'error': 'Method tidak didukung atau API key hilang untuk method API'}), 400
+        
+        if error:
+            return jsonify({'error': error}), 400
         
         if not comments_data:
             return jsonify({'error': 'Tidak dapat mengambil komentar dari video'}), 400
